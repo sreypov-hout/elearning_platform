@@ -8,10 +8,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-// CRITICAL IMPORT for breaking the cycle
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration; 
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService; // <--- CRITICAL: Defines the interface
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -20,22 +20,19 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
-public class AuthService implements UserDetailsService { // <--- Implementation resolves compilation
+public class AuthService implements UserDetailsService {
 
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder; 
+    private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
-    // CRITICAL FIX: Inject the Configuration instead of the final Manager bean to break the cycle
     private final AuthenticationConfiguration authenticationConfiguration;
 
-    // --- Core Logic: UserDetailsService Implementation (Required by the interface) ---
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        // keep using findByUsername as your repository defines
         return userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
     }
-
-    // --- Core Logic: Registration and Login ---
 
     public User registerUser(String username, String password, Role role) {
         if (userRepository.findByUsername(username).isPresent()) {
@@ -44,25 +41,17 @@ public class AuthService implements UserDetailsService { // <--- Implementation 
 
         User user = new User();
         user.setUsername(username);
-        user.setPassword(passwordEncoder.encode(password)); 
+        user.setPassword(passwordEncoder.encode(password));
         user.setRole(role);
 
         return userRepository.save(user);
     }
 
     public String login(String username, String password) {
-        AuthenticationManager authenticationManager;
         try {
-            // Retrieve the manager from the configuration object here (on demand)
-            authenticationManager = authenticationConfiguration.getAuthenticationManager();
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Authentication service failed to initialize.", e);
-        }
-        
-        try {
+            AuthenticationManager authenticationManager = authenticationConfiguration.getAuthenticationManager();
             authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(username, password)
-            );
+                    new UsernamePasswordAuthenticationToken(username, password));
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password.");
         }
@@ -70,9 +59,20 @@ public class AuthService implements UserDetailsService { // <--- Implementation 
         final UserDetails userDetails = loadUserByUsername(username);
         return jwtUtil.generateToken(userDetails);
     }
-    
+
     public User getCurrentUser() {
-        String username = (String) org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Object principal = SecurityContextHolder.getContext()
+                .getAuthentication()
+                .getPrincipal();
+
+        String username;
+
+        if (principal instanceof UserDetails userDetails) {
+            username = userDetails.getUsername();
+        } else {
+            username = principal.toString();
+        }
+
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found in context."));
     }

@@ -11,9 +11,7 @@ import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -24,50 +22,36 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final AuthService authService;
-    private final JwtFilter jwtAuthFilter;
-    
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-    
+    private final JwtFilter jwtFilter;
+    private final PasswordEncoder passwordEncoder; // inject the bean from PasswordConfig
+
     @Bean
     public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-        authProvider.setUserDetailsService(authService);
-        authProvider.setPasswordEncoder(passwordEncoder()); 
-        return authProvider;
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(authService); // authService must implement UserDetailsService
+        provider.setPasswordEncoder(passwordEncoder); // passwordEncoder must be a bean
+        return provider;
     }
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
     }
-    
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-                .csrf(AbstractHttpConfigurer::disable)
+        http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints
                         .requestMatchers("/api/auth/login", "/api/auth/register/student").permitAll()
-                        
-                        // Admin-only endpoints
-                        .requestMatchers("/api/auth/register/teacher", "/api/auth/register/admin").hasAuthority(Role.ADMIN.name())
-
-                        // Teacher-only endpoints (e.g., creating courses/lessons)
-                        .requestMatchers("/api/courses/teacher/**", "/api/lessons/teacher/**").hasAnyAuthority(Role.TEACHER.name(), Role.ADMIN.name())
-
-                        // Student-only endpoints (e.g., enrollment)
+                        .requestMatchers("/api/auth/register/teacher", "/api/auth/register/admin")
+                        .hasAuthority(Role.ADMIN.name())
+                        .requestMatchers("/api/courses/teacher/**", "/api/lessons/teacher/**")
+                        .hasAnyAuthority(Role.INSTRUCTOR.name(), Role.ADMIN.name())
                         .requestMatchers("/api/enrollments/**").hasAuthority(Role.STUDENT.name())
-                        
-                        // Default to require authentication for all other requests
-                        .anyRequest().authenticated() 
-                )
+                        .anyRequest().authenticated())
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authenticationProvider(authenticationProvider()) 
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .authenticationProvider(authenticationProvider())
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
