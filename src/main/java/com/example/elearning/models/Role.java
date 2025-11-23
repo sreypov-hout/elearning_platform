@@ -6,9 +6,11 @@ import lombok.RequiredArgsConstructor;
 @Getter
 @RequiredArgsConstructor
 public enum Role {
+
     ADMIN("ADMIN"),
     TEACHER("TEACHER"),
-    STUDENT("STUDENT");
+    STUDENT("STUDENT"),
+    INSTRUCTOR("INSTRUCTOR");
 
     private final String authority;
 }
